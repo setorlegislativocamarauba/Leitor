@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Leitor de Documentos - Câmara Municipal de Ubá/MG</title>
+    
+    <!-- PDF.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <!-- SheetJS for Excel export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- jsPDF for PDF export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <!-- jsPDF Autotable plugin -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+    <!-- html2canvas for PDF export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    
+    <link rel="shortcut icon" href="logo.png" type="image/png">
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-brand">
+                <img src="logo.png" alt="Câmara Municipal de Ubá" class="logo-img">
+                <div class="header-text">
+                    <h1 class="header-title">Câmara Municipal de Ubá/MG</h1>
+                    <p class="header-subtitle">Leitor de Documentos — Expediente da Sessão</p>
+                </div>
+            </div>
+            <div class="header-actions">
+                <button id="btnSummary" class="btn btn-outline" title="Resumo da Sessão">
+                    <span class="icon">📊</span> Resumo
+                </button>
+                <button id="btnExportExcel" class="btn btn-outline" title="Exportar Excel">
+                    <span class="icon">📗</span> Excel
+                </button>
+                <button id="btnExportPDF" class="btn btn-outline" title="Exportar PDF">
+                    <span class="icon">📕</span> PDF
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Folder Selection -->
+            <section id="folderSection" class="section folder-section">
+                <div class="folder-card">
+                    <div class="folder-icon">📂</div>
+                    <h2>Selecionar Pasta de Documentos</h2>
+                    <p>Escolha a pasta contendo os arquivos PDF do expediente da sessão.</p>
+                    <input type="file" id="folderInput" webkitdirectory multiple accept=".pdf" class="folder-input">
+                    <label for="folderInput" class="folder-label">
+                        <span class="icon">📁</span> Selecionar Pasta
+                    </label>
+                    <p id="folderStatus" class="folder-status"></p>
+                </div>
+            </section>
+
+            <!-- Document Viewer -->
+            <section id="viewerSection" class="section viewer-section" style="display: none;">
+                <div class="viewer-layout">
+                    <!-- Sidebar with document list -->
+                    <aside class="sidebar" id="sidebar">
+                        <div class="sidebar-header">
+                            <h3>Documentos</h3>
+                            <button id="btnToggleSidebar" class="btn-sidebar-toggle" title="Fechar painel">&times;</button>
+                        </div>
+                        <div class="sidebar-search">
+                            <input type="text" id="searchDocs" class="search-input" placeholder="Pesquisar documentos..." autocomplete="off">
+                            <span class="search-icon">🔍</span>
+                        </div>
+                        <div class="sidebar-list" id="sidebarList">
+                            <!-- Document list items will be rendered here -->
+                        </div>
+                    </aside>
+
+                    <!-- Main viewer area -->
+                    <div class="viewer-area">
+                        <!-- Sidebar toggle button (mobile) -->
+                        <button id="btnOpenSidebar" class="btn btn-open-sidebar" title="Abrir lista de documentos">
+                            <span class="icon">📋</span> Documentos
+                        </button>
+
+                        <!-- Councilors Bar -->
+                        <div class="councilors-bar">
+                            <div class="councilors-header">
+                                <h3>Vereadores</h3>
+                                <span class="councilors-toggle" id="toggleCouncilors">▼</span>
+                            </div>
+                            <div class="councilors-grid" id="councilorsGrid">
+                                <!-- Councilors will be rendered here -->
+                            </div>
+                        </div>
+
+                        <!-- PDF Viewer -->
+                        <div class="pdf-container">
+                            <div id="pdfViewer" class="pdf-viewer">
+                                <div class="pdf-loading" id="pdfLoading">
+                                    <div class="spinner"></div>
+                                    <p>Carregando documento...</p>
+                                </div>
+                                <!-- Canvases are created dynamically by pdf-viewer.js -->
+                            </div>
+                        </div>
+
+                        <!-- Document Info and Navigation -->
+                        <div class="document-footer">
+                            <div class="document-counter" id="documentCounter">
+                                Documento <span id="currentDoc">0</span> de <span id="totalDocs">0</span>
+                            </div>
+                            
+                            <div class="document-nav">
+                                <button id="btnPrev" class="btn btn-nav" title="Anterior">
+                                    <span class="icon">◀</span> Anterior
+                                </button>
+                                <button id="btnNext" class="btn btn-nav" title="Próximo">
+                                    Próximo <span class="icon">▶</span>
+                                </button>
+                            </div>
+
+                            <div class="document-name" id="documentName">-</div>
+                        </div>
+
+                        <!-- Requested By List -->
+                        <div class="requests-section">
+                            <h3>Solicitações de Cópia</h3>
+                            <div id="requestsList" class="requests-list">
+                                <p class="requests-empty">Nenhuma solicitação para este documento.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Summary Modal -->
+        <div id="summaryModal" class="modal" style="display: none;">
+            <div class="modal-backdrop"></div>
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Resumo da Sessão</h2>
+                    <button class="modal-close" id="closeSummary">&times;</button>
+                </div>
+                <div class="modal-body" id="summaryBody">
+                    <!-- Summary content will be rendered here -->
+                </div>
+                <div class="modal-footer">
+                    <button id="btnExportExcelFromSummary" class="btn btn-primary">
+                        <span class="icon">📗</span> Exportar Excel
+                    </button>
+                    <button id="btnExportPDFFromSummary" class="btn btn-primary">
+                        <span class="icon">📕</span> Exportar PDF
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Notification -->
+        <div id="notification" class="notification" style="display: none;"></div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="js/config.js"></script>
+    <script src="js/storage.js"></script>
+    <script src="js/pdf-viewer.js"></script>
+    <script src="js/parser.js"></script>
+    <script src="js/summary.js"></script>
+    <script src="js/export.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
