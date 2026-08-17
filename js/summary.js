@@ -3,48 +3,44 @@
  */
 const Summary = (() => {
     /**
-     * Gera o resumo por documento
-     * @param {Array} documents - Lista de documentos com metadados
-     * @returns {Object} - Dados do resumo por documento
+     * Gera o resumo completo de todos os documentos
+     * @param {Array} documents - Lista de documentos
+     * @returns {Array} - Dados de todos os documentos
      */
     function generateDocSummary(documents) {
-        const allRequests = Storage.getAllRequests();
-        const summary = [];
-
-        documents.forEach(doc => {
+        return documents.map((doc, index) => {
             const docId = doc.name;
-            const requests = allRequests[docId] || [];
-            const meta = doc.metadata || {};
+            const description = Storage.getDescription(docId);
+            const requests = Storage.getRequests(docId) || [];
             
             const councilors = requests.map(id => {
                 const c = COUNCILORS.find(c => c.id === id);
                 return c ? c.name : 'Desconhecido';
             });
 
-            if (requests.length > 0) {
-                // Criar object URL para o arquivo, se disponível
-                let fileUrl = '';
-                if (doc.file) {
+            // Criar object URL para o arquivo, se disponível
+            let fileUrl = '';
+            if (doc.file) {
+                try {
                     fileUrl = URL.createObjectURL(doc.file);
-                }
-                summary.push({
-                    docName: docId,
-                    docType: meta.type || '',
-                    docNumber: meta.number || '',
-                    docSubject: meta.subject || '',
-                    fileUrl: fileUrl,
-                    count: requests.length,
-                    councilors: councilors
-                });
+                } catch (e) {}
             }
-        });
 
-        return summary;
+            return {
+                docName: docId,
+                description: description,
+                pageCount: doc.pageCount || 0,
+                fileUrl: fileUrl,
+                count: requests.length,
+                councilors: councilors,
+                hasRequests: requests.length > 0
+            };
+        });
     }
 
     /**
-     * Gera o resumo por vereador
-     * @param {Array} documents - Lista de documentos com metadados
+     * Gera o resumo por vereador (apenas documentos com solicitações)
+     * @param {Array} documents - Lista de documentos
      * @returns {Array} - Dados do resumo por vereador
      */
     function generateCouncilorSummary(documents) {
@@ -64,19 +60,13 @@ const Summary = (() => {
         documents.forEach(doc => {
             const docId = doc.name;
             const requests = allRequests[docId] || [];
-            const meta = doc.metadata || {};
 
             if (requests.length > 0) {
-                const docDisplay = formatDocDisplay(meta, docId);
-                
                 requests.forEach(councilorId => {
                     if (councilorDocs[councilorId]) {
                         councilorDocs[councilorId].documents.push({
                             docName: docId,
-                            display: docDisplay,
-                            type: meta.type || 'Documento',
-                            number: meta.number || '',
-                            subject: meta.subject || ''
+                            display: docId
                         });
                     }
                 });
@@ -90,118 +80,159 @@ const Summary = (() => {
     }
 
     /**
-     * Formata a exibição do documento com tipo e número
-     */
-    function formatDocDisplay(meta, fallback) {
-        if (meta.type && meta.type !== 'Documento' && meta.number) {
-            return `${meta.type} nº ${meta.number}`;
-        }
-        if (meta.type && meta.type !== 'Documento') {
-            return `${meta.type} - ${meta.number || fallback}`;
-        }
-        if (meta.number) {
-            return `Documento nº ${meta.number}`;
-        }
-        return fallback;
-    }
-
-    /**
      * Renderiza o resumo no modal
      * @param {Array} documents - Lista de documentos
+     * @param {string} sessionDate - Data da sessão (dd/mm/aaaa)
      */
-    function render(documents) {
+    function render(documents, sessionDate) {
         const docSummary = generateDocSummary(documents);
         const councilorSummary = generateCouncilorSummary(documents);
         const container = document.getElementById('summaryBody');
 
-        if (docSummary.length === 0) {
-            container.innerHTML = `
-                <div class="summary-empty">
-                    <span class="icon">📋</span>
-                    <p>Nenhuma solicitação registrada nesta sessão.</p>
-                </div>
-            `;
-            return;
+        // Atualizar título do modal com a data
+        const titleEl = document.querySelector('.modal-header h2');
+        if (titleEl) {
+            titleEl.textContent = `Expediente da Sessão - ${sessionDate}`;
         }
 
         // Tabs navigation
         let html = `
             <div class="summary-tabs">
-                <button class="summary-tab active" data-tab="docs">Por Documento</button>
-                <button class="summary-tab" data-tab="councilors">Por Vereador</button>
+                <button class="summary-tab active" data-tab="docs">Documentos Lidos</button>
+                <button class="summary-tab" data-tab="requests">Solicitações de Cópia</button>
             </div>
-            <div class="summary-tab-content" id="tabDocs">
         `;
 
-        // Tabela por documento
+        // === TAB 1: TODOS OS DOCUMENTOS ===
+        html += `<div class="summary-tab-content" id="tabDocs">`;
         html += `
             <table class="summary-table">
                 <thead>
                     <tr>
+                        <th>Nº</th>
                         <th>Documento</th>
-                        <th>Solicitações</th>
-                        <th>Vereadores</th>
+                        <th>Descrição</th>
+                        <th>Páginas</th>
                     </tr>
                 </thead>
                 <tbody>
         `;
 
-        docSummary.forEach(item => {
+        docSummary.forEach((item, index) => {
+            const pageCount = item.pageCount > 0 ? item.pageCount : '-';
             html += `
                 <tr>
+                    <td class="doc-num">${index + 1}</td>
                     <td class="doc-name">
-                        <a href="#" class="doc-link" data-docname="${escapeHtml(item.docName)}">${escapeHtml(item.docName)}</a>
+                        ${item.fileUrl 
+                            ? `<a href="#" class="doc-link" data-docname="${escapeHtml(item.docName)}">${escapeHtml(item.docName)}</a>`
+                            : escapeHtml(item.docName)}
                     </td>
-                    <td class="doc-count">${item.count}</td>
-                    <td class="doc-councilors">${escapeHtml(item.councilors.join(', '))}</td>
+                    <td class="doc-description">${escapeHtml(item.description) || '-'}</td>
+                    <td class="doc-pages">${pageCount}</td>
                 </tr>
             `;
         });
 
-        const totalRequests = docSummary.reduce((sum, item) => sum + item.count, 0);
         html += `
                 </tbody>
                 <tfoot>
                     <tr>
-                        <td><strong>Total de documentos com solicitações:</strong> ${docSummary.length}</td>
-                        <td class="doc-count"><strong>${totalRequests}</strong></td>
+                        <td colspan="2"><strong>Total de documentos lidos:</strong> ${docSummary.length}</td>
                         <td></td>
+                        <td class="doc-pages"><strong>${docSummary.reduce((sum, d) => sum + (d.pageCount || 0), 0)}</strong></td>
                     </tr>
                 </tfoot>
             </table>
         `;
+        html += `</div>`;
 
-        html += `</div><div class="summary-tab-content" id="tabCouncilors" style="display:none;">`;
+        // === TAB 2: SOLICITAÇÕES DE CÓPIA ===
+        html += `<div class="summary-tab-content" id="tabRequests" style="display:none;">`;
 
-        // Tabela por vereador
-        if (councilorSummary.length > 0) {
-            html += `<div class="councilor-summary">`;
-            councilorSummary.forEach(c => {
+        const docsWithRequests = docSummary.filter(d => d.hasRequests);
+
+        if (docsWithRequests.length === 0) {
+            html += `
+                <div class="summary-empty">
+                    <span class="icon">📋</span>
+                    <p>Nenhuma solicitação de cópia registrada nesta sessão.</p>
+                </div>
+            `;
+        } else {
+            // Tabela por documento
+            html += `
+                <h3 style="margin-bottom:12px;font-size:1rem;">Por Documento</h3>
+                <table class="summary-table">
+                    <thead>
+                        <tr>
+                            <th>Documento</th>
+                            <th>Descrição</th>
+                            <th>Solicitações</th>
+                            <th>Vereadores</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            docsWithRequests.forEach(item => {
                 html += `
-                    <div class="councilor-block">
-                        <div class="councilor-block-header">
-                            <span class="councilor-avatar">${c.initials}</span>
-                            <span class="councilor-name">${escapeHtml(c.name)}</span>
-                            <span class="councilor-count">${c.documents.length} documento(s)</span>
-                        </div>
-                        <ul class="councilor-docs-list">
-                `;
-                c.documents.forEach(doc => {
-                    html += `
-                        <li class="councilor-doc-item">
-                            <span class="doc-indicator has-requests"></span>
-                            <span class="doc-display">${escapeHtml(doc.display)}</span>
-                        </li>
-                    `;
-                });
-                html += `
-                        </ul>
-                    </div>
+                    <tr>
+                        <td class="doc-name">
+                            ${item.fileUrl 
+                                ? `<a href="#" class="doc-link" data-docname="${escapeHtml(item.docName)}">${escapeHtml(item.docName)}</a>`
+                                : escapeHtml(item.docName)}
+                        </td>
+                        <td class="doc-description">${escapeHtml(item.description) || '-'}</td>
+                        <td class="doc-count">${item.count}</td>
+                        <td class="doc-councilors">${escapeHtml(item.councilors.join(', '))}</td>
+                    </tr>
                 `;
             });
-            html += `</div>`;
-        } else {
-            html += `<p class="summary-empty">Nenhum dado disponível.</p>`;
+
+            const totalRequests = docsWithRequests.reduce((sum, item) => sum + item.count, 0);
+            html += `
+                    </tbody>
+                    <tfoot>
+                        <tr>
+                            <td><strong>Total:</strong> ${docsWithRequests.length} documentos</td>
+                            <td></td>
+                            <td class="doc-count"><strong>${totalRequests}</strong></td>
+                            <td></td>
+                        </tr>
+                    </tfoot>
+                </table>
+            `;
+
+            // Por vereador
+            if (councilorSummary.length > 0) {
+                html += `<h3 style="margin:20px 0 12px;font-size:1rem;">Por Vereador</h3>`;
+                html += `<div class="councilor-summary">`;
+                councilorSummary.forEach(c => {
+                    html += `
+                        <div class="councilor-block">
+                            <div class="councilor-block-header">
+                                <span class="councilor-avatar">${c.initials}</span>
+                                <span class="councilor-name">${escapeHtml(c.name)}</span>
+                                <span class="councilor-count">${c.documents.length} documento(s)</span>
+                            </div>
+                            <ul class="councilor-docs-list">
+                    `;
+                    c.documents.forEach(doc => {
+                        html += `
+                            <li class="councilor-doc-item">
+                                <span class="doc-indicator has-requests"></span>
+                                <span class="doc-display">${escapeHtml(doc.display)}</span>
+                            </li>
+                        `;
+                    });
+                    html += `
+                            </ul>
+                        </div>
+                    `;
+                });
+                html += `</div>`;
+            }
         }
 
         html += `</div>`;
@@ -212,7 +243,6 @@ const Summary = (() => {
             link.addEventListener('click', (e) => {
                 e.preventDefault();
                 const docName = link.dataset.docname;
-                // Buscar o item correspondente no docSummary
                 const item = docSummary.find(d => d.docName === docName);
                 if (item && item.fileUrl) {
                     window.open(item.fileUrl, '_blank');
@@ -227,8 +257,8 @@ const Summary = (() => {
                 tab.classList.add('active');
                 
                 const tabId = tab.dataset.tab;
-                document.getElementById('tabDocs').style.display = tabId === 'docs' ? 'block' : 'none';
-                document.getElementById('tabCouncilors').style.display = tabId === 'councilors' ? 'block' : 'none';
+                container.querySelectorAll('.summary-tab-content').forEach(c => c.style.display = 'none');
+                document.getElementById('tab' + tabId.charAt(0).toUpperCase() + tabId.slice(1)).style.display = 'block';
             });
         });
     }
@@ -236,9 +266,10 @@ const Summary = (() => {
     /**
      * Abre o modal de resumo
      * @param {Array} documents - Lista de documentos
+     * @param {string} sessionDate - Data da sessão (dd/mm/aaaa)
      */
-    function open(documents) {
-        render(documents);
+    function open(documents, sessionDate) {
+        render(documents, sessionDate);
         document.getElementById('summaryModal').style.display = 'flex';
     }
 

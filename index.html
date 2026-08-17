@@ -15,6 +15,8 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
     <!-- html2canvas for PDF export -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <!-- pdf-lib for PDF merging -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
     
     <link rel="shortcut icon" href="logo.png" type="image/png">
     <link rel="stylesheet" href="css/styles.css">
@@ -27,7 +29,7 @@
                 <img src="logo.png" alt="Câmara Municipal de Ubá" class="logo-img">
                 <div class="header-text">
                     <h1 class="header-title">Câmara Municipal de Ubá/MG</h1>
-                    <p class="header-subtitle">Leitor de Documentos — Expediente da Sessão</p>
+                    <p class="header-subtitle">Gerenciador Digital do Expediente da Sessão</p>
                 </div>
             </div>
             <div class="header-actions">
@@ -45,8 +47,24 @@
 
         <!-- Main Content -->
         <main class="main-content">
+            <!-- Session Setup -->
+            <section id="sessionSection" class="section session-section">
+                <div class="session-card">
+                    <div class="session-icon">🏛️</div>
+                    <h2>Dados da Reunião</h2>
+                    <p>Informe a data da reunião para iniciar o gerenciamento do expediente.</p>
+                    <div class="session-form">
+                        <label for="sessionDate" class="session-label">Data da Reunião</label>
+                        <input type="date" id="sessionDate" class="session-date-input">
+                    </div>
+                    <button id="btnStartSession" class="btn btn-start-session">
+                        <span class="icon">🚀</span> Iniciar Sessão
+                    </button>
+                </div>
+            </section>
+
             <!-- Folder Selection -->
-            <section id="folderSection" class="section folder-section">
+            <section id="folderSection" class="section folder-section" style="display: none;">
                 <div class="folder-card">
                     <div class="folder-icon">📂</div>
                     <h2>Selecionar Pasta de Documentos</h2>
@@ -124,6 +142,16 @@
                             <div class="document-name" id="documentName">-</div>
                         </div>
 
+                        <!-- Document Description -->
+                        <div class="description-section">
+                            <h3>Descrição do Documento</h3>
+                            <textarea id="docDescription" class="description-textarea" placeholder="Descreva o conteúdo deste documento para constar no resumo da sessão..." maxlength="500"></textarea>
+                            <div class="description-footer">
+                                <span id="descriptionCount" class="description-count">0/500</span>
+                                <span id="descriptionStatus" class="description-status"></span>
+                            </div>
+                        </div>
+
                         <!-- Requested By List -->
                         <div class="requests-section">
                             <h3>Solicitações de Cópia</h3>
@@ -148,12 +176,18 @@
                     <!-- Summary content will be rendered here -->
                 </div>
                 <div class="modal-footer">
-                    <button id="btnExportExcelFromSummary" class="btn btn-primary">
-                        <span class="icon">📗</span> Exportar Excel
-                    </button>
-                    <button id="btnExportPDFFromSummary" class="btn btn-primary">
-                        <span class="icon">📕</span> Exportar PDF
-                    </button>
+                    <label class="toggle-requests" title="Incluir solicitações de cópia dos vereadores no PDF">
+                        <input type="checkbox" id="includeRequestsInPDF">
+                        <span class="toggle-requests-label">📋 Incluir solicitações de cópia no PDF</span>
+                    </label>
+                    <div class="modal-footer-buttons">
+                        <button id="btnExportExcelFromSummary" class="btn btn-primary">
+                            <span class="icon">📗</span> Exportar Excel
+                        </button>
+                        <button id="btnExportPDFFromSummary" class="btn btn-primary">
+                            <span class="icon">📕</span> Exportar PDF
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -166,7 +200,6 @@
     <script src="js/config.js"></script>
     <script src="js/storage.js"></script>
     <script src="js/pdf-viewer.js"></script>
-    <script src="js/parser.js"></script>
     <script src="js/summary.js"></script>
     <script src="js/export.js"></script>
     <script src="js/app.js"></script>

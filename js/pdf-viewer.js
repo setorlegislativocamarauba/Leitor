@@ -259,6 +259,10 @@ const PdfViewer = (() => {
         return pdfDoc;
     }
 
+    function getPageCount() {
+        return pdfDoc ? pdfDoc.numPages : 0;
+    }
+
     return {
         init,
         loadFile,
@@ -266,6 +270,7 @@ const PdfViewer = (() => {
         resize,
         clear,
         showLoading,
-        getPdfDoc
+        getPdfDoc,
+        getPageCount
     };
 })();

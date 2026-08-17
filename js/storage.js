@@ -105,6 +105,33 @@ const Storage = (() => {
     }
 
     /**
+     * Obtém a descrição de um documento
+     * @param {string} docId - Identificador do documento (nome do arquivo)
+     * @returns {string}
+     */
+    function getDescription(docId) {
+        if (!data) init();
+        if (data[docId] && data[docId]._description !== undefined) {
+            return data[docId]._description;
+        }
+        return '';
+    }
+
+    /**
+     * Salva a descrição de um documento
+     * @param {string} docId - Identificador do documento
+     * @param {string} description - Descrição do documento
+     */
+    function setDescription(docId, description) {
+        if (!data) init();
+        if (!data[docId]) {
+            data[docId] = [];
+        }
+        data[docId]._description = description;
+        save();
+    }
+
+    /**
      * Limpa todos os dados
      */
     function clearAll() {
@@ -120,6 +147,8 @@ const Storage = (() => {
         removeRequest,
         getAllRequests,
         hasRequest,
+        getDescription,
+        setDescription,
         clearAll
     };
 })();

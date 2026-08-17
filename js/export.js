@@ -5,8 +5,9 @@ const Export = (() => {
     /**
      * Exporta o resumo para Excel
      * @param {Array} documents - Lista de documentos
+     * @param {string} sessionDate - Data da sessão (dd/mm/aaaa)
      */
-    function exportExcel(documents) {
+    function exportExcel(documents, sessionDate) {
         const docData = Summary.generateDocSummary(documents);
         const councilorData = Summary.generateCouncilorSummary(documents);
         
@@ -18,48 +19,79 @@ const Export = (() => {
         try {
             const wb = XLSX.utils.book_new();
 
-            // Sheet 1: Por Documento
-            const docRows = [['Documento', 'Solicitações', 'Vereadores Interessados']];
-            docData.forEach(item => {
-                docRows.push([
+            // Sheet 1: TODOS OS DOCUMENTOS
+            const titleRow = [`Expediente da Sessão - ${sessionDate}`, '', ''];
+            const allDocRows = [titleRow, ['Nº', 'Documento', 'Descrição', 'Páginas']];
+            docData.forEach((item, index) => {
+                allDocRows.push([
+                    String(index + 1),
                     item.docName,
-                    item.count,
-                    item.councilors.join(', ')
+                    item.description || '',
+                    item.pageCount > 0 ? String(item.pageCount) : '-'
                 ]);
             });
-            const totalRequests = docData.reduce((sum, item) => sum + item.count, 0);
-            docRows.push([`Total de documentos: ${docData.length}`, totalRequests, '']);
+            const totalPages = docData.reduce((sum, d) => sum + (d.pageCount || 0), 0);
+            allDocRows.push([`Total: ${docData.length} documentos`, '', '', String(totalPages)]);
 
-            const ws1 = XLSX.utils.aoa_to_sheet(docRows);
+            const ws1 = XLSX.utils.aoa_to_sheet(allDocRows);
             ws1['!cols'] = [
+                { wch: 6 },
                 { wch: 50 },
-                { wch: 15 },
-                { wch: 60 }
+                { wch: 60 },
+                { wch: 10 }
             ];
-            XLSX.utils.book_append_sheet(wb, ws1, 'Por Documento');
+            XLSX.utils.book_append_sheet(wb, ws1, 'Documentos Lidos');
 
-            // Sheet 2: Por Vereador
-            if (councilorData.length > 0) {
-                const councilorRows = [['Vereador', 'Documentos Solicitados']];
-                councilorData.forEach(c => {
-                    c.documents.forEach((doc, idx) => {
-                        if (idx === 0) {
-                            councilorRows.push([c.name, doc.display]);
-                        } else {
-                            councilorRows.push(['', doc.display]);
-                        }
-                    });
+            // Sheet 2: SOLICITAÇÕES DE CÓPIA
+            const docsWithRequests = docData.filter(d => d.hasRequests);
+
+            if (docsWithRequests.length > 0) {
+                // Tabela por documento
+                const reqTitleRow = [`Solicitações de Cópia - ${sessionDate}`, '', '', ''];
+                const reqRows = [reqTitleRow, ['Documento', 'Descrição', 'Solicitações', 'Vereadores']];
+                docsWithRequests.forEach(item => {
+                    reqRows.push([
+                        item.docName,
+                        item.description || '',
+                        item.count,
+                        item.councilors.join(', ')
+                    ]);
                 });
+                const totalRequests = docsWithRequests.reduce((sum, item) => sum + item.count, 0);
+                reqRows.push([`Total: ${docsWithRequests.length} documentos`, '', totalRequests, '']);
 
-                const ws2 = XLSX.utils.aoa_to_sheet(councilorRows);
+                const ws2 = XLSX.utils.aoa_to_sheet(reqRows);
                 ws2['!cols'] = [
-                    { wch: 30 },
+                    { wch: 50 },
+                    { wch: 60 },
+                    { wch: 15 },
                     { wch: 60 }
                 ];
-                XLSX.utils.book_append_sheet(wb, ws2, 'Por Vereador');
+                XLSX.utils.book_append_sheet(wb, ws2, 'Solicitações');
+
+                // Sheet 3: Por Vereador
+                if (councilorData.length > 0) {
+                    const councilorRows = [['Vereador', 'Documentos Solicitados']];
+                    councilorData.forEach(c => {
+                        c.documents.forEach((doc, idx) => {
+                            if (idx === 0) {
+                                councilorRows.push([c.name, doc.display]);
+                            } else {
+                                councilorRows.push(['', doc.display]);
+                            }
+                        });
+                    });
+
+                    const ws3 = XLSX.utils.aoa_to_sheet(councilorRows);
+                    ws3['!cols'] = [
+                        { wch: 30 },
+                        { wch: 60 }
+                    ];
+                    XLSX.utils.book_append_sheet(wb, ws3, 'Por Vereador');
+                }
             }
 
-            const fileName = `resumo_sessao_${formatDate()}.xlsx`;
+            const fileName = `expediente_${formatDate(sessionDate)}.xlsx`;
             XLSX.writeFile(wb, fileName);
             showNotification('Arquivo Excel exportado com sucesso!', 'success');
         } catch (e) {
@@ -71,8 +103,9 @@ const Export = (() => {
     /**
      * Exporta o resumo para PDF
      * @param {Array} documents - Lista de documentos
+     * @param {string} sessionDate - Data da sessão (dd/mm/aaaa)
      */
-    async function exportPDF(documents) {
+    async function exportPDF(documents, sessionDate, includeRequests = false) {
         const docData = Summary.generateDocSummary(documents);
         const councilorData = Summary.generateCouncilorSummary(documents);
         
@@ -83,44 +116,54 @@ const Export = (() => {
 
         try {
             const { jsPDF } = window.jspdf;
-            const doc = new jsPDF('landscape', 'mm', 'a4');
+            const report = new jsPDF('portrait', 'mm', 'a4');
             
-            const pageWidth = doc.internal.pageSize.getWidth();
-            const pageHeight = doc.internal.pageSize.getHeight();
-            const margin = 15;
+            const pageWidth = report.internal.pageSize.getWidth();
+            const pageHeight = report.internal.pageSize.getHeight();
+            const margin = 8;
+
+            const fontName = 'times';
 
             // Título
-            doc.setFontSize(16);
-            doc.setFont('helvetica', 'bold');
-            doc.text('Resumo da Sessão - Solicitações de Cópia', pageWidth / 2, 20, { align: 'center' });
+            report.setFontSize(16);
+            report.setFont(fontName, 'bold');
+            report.text(`Expediente da Sessão - ${sessionDate}`, pageWidth / 2, 16, { align: 'center' });
             
-            doc.setFontSize(10);
-            doc.setFont('helvetica', 'normal');
-            doc.text(`Gerado em: ${new Date().toLocaleString('pt-BR')}`, pageWidth / 2, 28, { align: 'center' });
+            report.setFontSize(12);
+            report.setFont(fontName, 'normal');
+            report.text(`Gerado em: ${new Date().toLocaleString('pt-BR')}`, pageWidth / 2, 24, { align: 'center' });
 
-            // Tabela por documento
-            doc.setFontSize(12);
-            doc.setFont('helvetica', 'bold');
-            doc.text('Por Documento', margin, 38);
+            // PÁGINA 1: TODOS OS DOCUMENTOS
+            report.setFontSize(14);
+            report.setFont(fontName, 'bold');
+            report.text('Documentos Lidos', margin, 34);
 
-            const docHeaders = [['Documento', 'Solicitações', 'Vereadores']];
-            const docBody = docData.map(item => [
-                item.docName,
-                String(item.count),
-                item.councilors.join(', ')
-            ]);
+           const docBody = docData.map((item, index) => [
+    String(index + 1),                              // Nº
+    item.docName,                                  // Documento
+    item.pageCount > 0 ? String(item.pageCount) : '-', // Páginas
+    item.description || ''                         // Descrição
+]);
 
-            const totalRequests = docData.reduce((sum, item) => sum + item.count, 0);
-            docBody.push([`Total: ${docData.length}`, String(totalRequests), '']);
+            const totalPagesAll = docData.reduce((sum, d) => sum + (d.pageCount || 0), 0);
+            docBody.push([
+    '',
+    `Total de documentos: ${docData.length}`,
+    String(totalPagesAll),
+    ''
+]);
 
-            doc.autoTable({
+            const docHeaders = [['Nº', 'Documento', 'Páginas', 'Descrição']];
+
+            report.autoTable({
                 head: docHeaders,
                 body: docBody,
-                startY: 42,
+                startY: 38,
                 margin: { left: margin, right: margin },
                 styles: {
-                    fontSize: 12,
-                    cellPadding: 4,
+                    fontSize: 10,
+                    font: fontName,
+                    cellPadding: 2,
                     overflow: 'linebreak',
                     halign: 'left',
                     valign: 'top'
@@ -129,69 +172,169 @@ const Export = (() => {
                     fillColor: [26, 115, 232],
                     textColor: [255, 255, 255],
                     fontStyle: 'bold',
-                    fontSize: 12
+                    fontSize: 10
                 },
                 columnStyles: {
-                    0: { cellWidth: 80 },
-                    1: { cellWidth: 25, halign: 'center' },
-                    2: { cellWidth: 'auto' }
-                }
+                    0: { cellWidth: 15, halign: 'center' },
+                    1: { cellWidth: 23 },
+                    2: { cellWidth: 18, halign: 'center' },
+                    3: { cellWidth: 136 }
+                },
+                tableWidth: 194
             });
 
-            // Tabela por vereador (nova página)
-            if (councilorData.length > 0) {
-                doc.addPage();
+            // PÁGINA 2: SOLICITAÇÕES DE CÓPIA (apenas se o toggle estiver ativo)
+            const docsWithRequests = docData.filter(d => d.hasRequests);
+
+            if (includeRequests && docsWithRequests.length > 0) {
+                report.addPage();
                 
-                doc.setFontSize(16);
-                doc.setFont('helvetica', 'bold');
-                doc.text('Resumo por Vereador', pageWidth / 2, 20, { align: 'center' });
+                report.setFontSize(16);
+                report.setFont(fontName, 'bold');
+                report.text('Solicitações de Cópia', pageWidth / 2, 16, { align: 'center' });
 
-                let yPos = 35;
-                councilorData.forEach(c => {
-                    // Verificar se precisa de nova página
-                    if (yPos > pageHeight - 40) {
-                        doc.addPage();
-                        yPos = 20;
-                    }
+                // Tabela por documento
+                report.setFontSize(14);
+                report.setFont(fontName, 'bold');
+                report.text('Por Documento', margin, 28);
 
-                    doc.setFontSize(11);
-                    doc.setFont('helvetica', 'bold');
-                    doc.text(`${c.name} (${c.documents.length} documento(s))`, margin, yPos);
-                    yPos += 6;
+                const reqHeaders = [['Documento', 'Descrição', 'Solicitações', 'Vereadores']];
+                const reqBody = docsWithRequests.map(item => [
+                    item.docName,
+                    item.description || '',
+                    String(item.count),
+                    item.councilors.join(', ')
+                ]);
+                const totalRequests = docsWithRequests.reduce((sum, item) => sum + item.count, 0);
+                reqBody.push([`Total: ${docsWithRequests.length}`, '', String(totalRequests), '']);
 
-                    doc.setFontSize(9);
-                    doc.setFont('helvetica', 'normal');
-                    c.documents.forEach(d => {
-                        doc.text(`• ${d.display}`, margin + 5, yPos);
-                        yPos += 5;
-                    });
-
-                    yPos += 4;
+                report.autoTable({
+                    head: reqHeaders,
+                    body: reqBody,
+                    startY: 32,
+                    margin: { left: margin, right: margin },
+                    styles: {
+                        fontSize: 9,
+                        font: fontName,
+                        cellPadding: 2,
+                        overflow: 'linebreak',
+                        halign: 'left',
+                        valign: 'top'
+                    },
+                    headStyles: {
+                        fillColor: [26, 115, 232],
+                        textColor: [255, 255, 255],
+                        fontStyle: 'bold',
+                        fontSize: 10
+                    },
+                    columnStyles: {
+                        0: { cellWidth: 45 },
+                        1: { cellWidth: 45 },
+                        2: { cellWidth: 18, halign: 'center' },
+                        3: { cellWidth: 86 }
+                    },
+                    tableWidth: 194,
+                    rowPageBreak: 'auto'
                 });
             }
 
-            // Rodapé em todas as páginas
-            const totalPages = doc.internal.getNumberOfPages();
-            for (let i = 1; i <= totalPages; i++) {
-                doc.setPage(i);
-                doc.setFontSize(8);
-                doc.setFont('helvetica', 'normal');
-                doc.setTextColor(128);
-                doc.text(
-                    `Página ${i} de ${totalPages}`,
+            // Rodapé nas páginas do relatório
+            const reportTotalPages = report.internal.getNumberOfPages();
+            for (let i = 1; i <= reportTotalPages; i++) {
+                report.setPage(i);
+                report.setFontSize(8);
+                report.setFont(fontName, 'normal');
+                report.setTextColor(128);
+                report.text(
+                    `Página ${i}`,
                     pageWidth / 2,
-                    pageHeight - 10,
+                    pageHeight - 6,
                     { align: 'center' }
                 );
             }
 
-            const fileName = `resumo_sessao_${formatDate()}.pdf`;
-            doc.save(fileName);
+            // Converter o relatório para bytes
+            const reportBytes = report.output('arraybuffer');
+
+            // Usar pdf-lib para mesclar relatório + todos os PDFs
+            const PDFLib = window.PDFLib;
+            const mergedPdf = await PDFLib.PDFDocument.create();
+
+            // Carregar e copiar páginas do relatório
+            const reportPdf = await PDFLib.PDFDocument.load(reportBytes);
+            const reportPages = await mergedPdf.copyPages(reportPdf, reportPdf.getPageIndices());
+            reportPages.forEach(page => mergedPdf.addPage(page));
+
+            // Adicionar separador com índice de documentos
+            const { rgb } = PDFLib;
+
+            // Carregar e anexar cada PDF da lista de documentos
+            for (let i = 0; i < documents.length; i++) {
+                const doc = documents[i];
+                if (!doc.file) continue;
+
+                try {
+                    // Adicionar página separadora com nome do documento
+                    const separatorPage = mergedPdf.addPage([595.28, 841.89]); // A4 em pontos
+                    separatorPage.setFontSize(16);
+                    const helvBold = await mergedPdf.embedFont(PDFLib.StandardFonts.HelveticaBold);
+                    const helv = await mergedPdf.embedFont(PDFLib.StandardFonts.Helvetica);
+
+                    separatorPage.drawText(`Documento ${i + 1} de ${documents.length}`, {
+                        x: 50,
+                        y: 500,
+                        size: 20,
+                        font: helvBold,
+                        color: rgb(0, 0.2, 0.6)
+                    });
+                    separatorPage.drawText(doc.name, {
+                        x: 50,
+                        y: 470,
+                        size: 14,
+                        font: helv,
+                        color: rgb(0.2, 0.2, 0.2)
+                    });
+
+                    // Carregar o PDF do arquivo
+                    const fileBytes = await readFileAsArrayBuffer(doc.file);
+                    const docPdf = await PDFLib.PDFDocument.load(fileBytes, {
+                        ignoreEncryption: true
+                    });
+                    const docPages = await mergedPdf.copyPages(docPdf, docPdf.getPageIndices());
+                    docPages.forEach(page => mergedPdf.addPage(page));
+                } catch (e) {
+                    console.warn(`Erro ao anexar ${doc.name}:`, e);
+                    // Continua com os próximos documentos
+                }
+            }
+
+            // Salvar PDF mesclado
+            const mergedBytes = await mergedPdf.save();
+            const blob = new Blob([mergedBytes], { type: 'application/pdf' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `expediente_${formatDate(sessionDate)}.pdf`;
+            link.click();
+            URL.revokeObjectURL(url);
+
             showNotification('Arquivo PDF exportado com sucesso!', 'success');
         } catch (e) {
             console.error('Erro ao exportar PDF:', e);
             showNotification('Erro ao exportar PDF.', 'error');
         }
+    }
+
+    /**
+     * Lê arquivo como ArrayBuffer
+     */
+    function readFileAsArrayBuffer(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsArrayBuffer(file);
+        });
     }
 
     /**
@@ -209,17 +352,20 @@ const Export = (() => {
     }
 
     /**
-     * Formata a data atual para nome de arquivo
+     * Formata a data da sessão para nome de arquivo
+     * @param {string} sessionDate - Data da sessão (dd/mm/aaaa)
      * @returns {string}
      */
-    function formatDate() {
+    function formatDate(sessionDate) {
+        if (sessionDate) {
+            // Recebe dd/mm/aaaa, retorna ddmmaaaa
+            return sessionDate.replace(/\//g, '');
+        }
         const now = new Date();
         const d = String(now.getDate()).padStart(2, '0');
         const m = String(now.getMonth() + 1).padStart(2, '0');
         const y = now.getFullYear();
-        const h = String(now.getHours()).padStart(2, '0');
-        const min = String(now.getMinutes()).padStart(2, '0');
-        return `${d}${m}${y}_${h}${min}`;
+        return `${d}${m}${y}`;
     }
 
     /**

@@ -6,6 +6,8 @@ const App = (() => {
     let documents = [];
     let currentIndex = 0;
     let currentDocId = null;
+    let sessionDate = '';
+    let openedDocs = new Set();
 
     // Elementos DOM
     const els = {};
@@ -15,6 +17,9 @@ const App = (() => {
      */
     function init() {
         // Cache de elementos DOM
+        els.sessionSection = document.getElementById('sessionSection');
+        els.sessionDate = document.getElementById('sessionDate');
+        els.btnStartSession = document.getElementById('btnStartSession');
         els.folderSection = document.getElementById('folderSection');
         els.viewerSection = document.getElementById('viewerSection');
         els.folderInput = document.getElementById('folderInput');
@@ -39,10 +44,20 @@ const App = (() => {
         els.searchDocs = document.getElementById('searchDocs');
         els.btnToggleSidebar = document.getElementById('btnToggleSidebar');
         els.btnOpenSidebar = document.getElementById('btnOpenSidebar');
+        els.docDescription = document.getElementById('docDescription');
+        els.descriptionCount = document.getElementById('descriptionCount');
+        els.descriptionStatus = document.getElementById('descriptionStatus');
         
         // Inicializar módulos
         Storage.init();
         PdfViewer.init();
+
+        // Preencher data atual no campo de data
+        const today = new Date();
+        const year = today.getFullYear();
+        const month = String(today.getMonth() + 1).padStart(2, '0');
+        const day = String(today.getDate()).padStart(2, '0');
+        els.sessionDate.value = `${year}-${month}-${day}`;
 
         // Configurar eventos
         setupEvents();
@@ -55,6 +70,9 @@ const App = (() => {
      * Configura todos os eventos da aplicação
      */
     function setupEvents() {
+        // Iniciar sessão
+        els.btnStartSession.addEventListener('click', handleStartSession);
+
         // Seleção de pasta
         els.folderInput.addEventListener('change', handleFolderSelect);
 
@@ -95,18 +113,36 @@ const App = (() => {
         document.querySelector('.councilors-header').addEventListener('click', toggleCouncilors);
 
         // Summary
-        els.btnSummary.addEventListener('click', () => Summary.open(documents));
+        els.btnSummary.addEventListener('click', () => Summary.open(documents, sessionDate));
         els.closeSummary.addEventListener('click', Summary.close);
         document.querySelector('.modal-backdrop').addEventListener('click', Summary.close);
 
         // Export
-        els.btnExportExcel.addEventListener('click', () => Export.exportExcel(documents));
-        els.btnExportPDF.addEventListener('click', () => Export.exportPDF(documents));
+        els.btnExportExcel.addEventListener('click', () => Export.exportExcel(documents, sessionDate));
+        els.btnExportPDF.addEventListener('click', () => {
+            const includeRequests = document.getElementById('includeRequestsInPDF').checked;
+            Export.exportPDF(documents, sessionDate, includeRequests);
+        });
         els.btnExportExcelFromSummary.addEventListener('click', () => {
-            Export.exportExcel(documents);
+            Export.exportExcel(documents, sessionDate);
         });
         els.btnExportPDFFromSummary.addEventListener('click', () => {
-            Export.exportPDF(documents);
+            const includeRequests = document.getElementById('includeRequestsInPDF').checked;
+            Export.exportPDF(documents, sessionDate, includeRequests);
+        });
+
+        // Description - auto-save
+        let descriptionSaveTimeout;
+        els.docDescription.addEventListener('input', () => {
+            updateDescriptionCount();
+            clearTimeout(descriptionSaveTimeout);
+            descriptionSaveTimeout = setTimeout(() => {
+                saveCurrentDescription();
+            }, 1000);
+        });
+        els.docDescription.addEventListener('blur', () => {
+            clearTimeout(descriptionSaveTimeout);
+            saveCurrentDescription();
         });
 
         // Sidebar
@@ -128,6 +164,25 @@ const App = (() => {
             clearTimeout(resizeTimeout);
             resizeTimeout = setTimeout(() => PdfViewer.resize(), 300);
         });
+    }
+
+    /**
+     * Manipula o clique em "Iniciar Sessão"
+     */
+    function handleStartSession() {
+        const dateValue = els.sessionDate.value;
+        if (!dateValue) {
+            showNotification('Informe a data da reunião.', 'error');
+            return;
+        }
+
+        // Formatar data para exibição (dd/mm/aaaa)
+        const parts = dateValue.split('-');
+        sessionDate = `${parts[2]}/${parts[1]}/${parts[0]}`;
+
+        // Avançar para seleção de pasta
+        els.sessionSection.style.display = 'none';
+        els.folderSection.style.display = 'flex';
     }
 
     /**
@@ -219,7 +274,7 @@ const App = (() => {
         documents = pdfFiles.map(f => ({
             name: f.name,
             file: f,
-            metadata: null // Será preenchido após análise
+            pageCount: 0
         }));
 
         // Atualizar interface
@@ -248,12 +303,15 @@ const App = (() => {
             return;
         }
 
+        // Save current description before navigating
+        saveCurrentDescription();
+
         currentIndex = newIndex;
         loadDocument(currentIndex);
     }
 
     /**
-     * Carrega um documento pelo índice e faz análise inteligente do PDF
+     * Carrega um documento pelo índice
      * @param {number} index 
      */
     async function loadDocument(index) {
@@ -261,6 +319,10 @@ const App = (() => {
 
         const doc = documents[index];
         currentDocId = doc.name;
+
+        // Marcar como aberto imediatamente ao clicar
+        openedDocs.add(doc.name);
+        renderSidebarList();
 
         // Atualizar contador
         els.currentDoc.textContent = index + 1;
@@ -275,8 +337,11 @@ const App = (() => {
             return;
         }
 
-        // Análise inteligente do PDF (extrair texto, identificar tipo/número/assunto)
-        await analyzeDocument(doc);
+        // Obter número de páginas
+        doc.pageCount = PdfViewer.getPageCount();
+
+        // Carregar descrição do documento
+        loadDescription();
 
         // Atualizar estado dos vereadores e solicitações
         updateCouncilorsState();
@@ -285,30 +350,57 @@ const App = (() => {
     }
 
     /**
-     * Analisa o documento PDF para extrair metadados
-     * @param {Object} doc - Documento com {name, file, metadata}
+     * Carrega a descrição salva do documento atual
      */
-    async function analyzeDocument(doc) {
-        try {
-            const pdfDoc = PdfViewer.getPdfDoc();
-            if (!pdfDoc) return;
-
-            // Analisar com o Parser
-            const result = await Parser.analyze(pdfDoc);
-            
-            // Armazenar metadados no documento
-            doc.metadata = {
-                type: result.type,
-                number: result.number,
-                subject: result.subject
-            };
-
-            // Atualizar sidebar com tipo/número
-            renderSidebarList();
-        } catch (e) {
-            console.warn('Erro na análise do documento:', e);
-            doc.metadata = { type: '', number: '', subject: '' };
+    function loadDescription() {
+        if (!currentDocId) {
+            els.docDescription.value = '';
+            updateDescriptionCount();
+            updateDescriptionStatus('');
+            return;
         }
+        const desc = Storage.getDescription(currentDocId);
+        els.docDescription.value = desc;
+        updateDescriptionCount();
+        updateDescriptionStatus(desc ? 'Descrição carregada' : '');
+    }
+
+    /**
+     * Salva a descrição do documento atual
+     */
+    function saveCurrentDescription() {
+        if (!currentDocId) return;
+        const description = els.docDescription.value;
+        Storage.setDescription(currentDocId, description);
+        updateDescriptionStatus('Salvo automaticamente');
+    }
+
+    /**
+     * Atualiza o indicador de status da descrição
+     */
+    function updateDescriptionStatus(message) {
+        if (!els.descriptionStatus) return;
+        if (!message) {
+            els.descriptionStatus.textContent = '';
+            return;
+        }
+        const now = new Date();
+        const time = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+        els.descriptionStatus.textContent = `${message} às ${time}`;
+        els.descriptionStatus.classList.add('saved');
+        
+        // Remove o destaque após 2 segundos
+        setTimeout(() => {
+            els.descriptionStatus.classList.remove('saved');
+        }, 2000);
+    }
+
+    /**
+     * Atualiza o contador de caracteres da descrição
+     */
+    function updateDescriptionCount() {
+        const len = els.docDescription.value.length;
+        els.descriptionCount.textContent = `${len}/500`;
     }
 
     /**
@@ -365,7 +457,7 @@ const App = (() => {
     }
 
     /**
-     * Renderiza a lista de documentos no sidebar com tipo e número
+     * Renderiza a lista de documentos no sidebar
      */
     function renderSidebarList() {
         if (!els.sidebarList) return;
@@ -393,22 +485,13 @@ const App = (() => {
             const requests = Storage.getRequests(doc.name);
             const requestCount = requests.length;
             const isActive = currentDocId === doc.name;
+            const isOpened = openedDocs.has(doc.name);
             const hasRequests = requestCount > 0;
-            const meta = doc.metadata || {};
-            
-            // Nome de exibição: se tiver tipo e número, mostra formatado
-            let displayName = doc.name;
-            if (meta.type && meta.type !== 'Documento' && meta.number) {
-                displayName = `${meta.type} nº ${meta.number}`;
-            } else if (meta.type && meta.type !== 'Documento') {
-                displayName = `${meta.type} - ${doc.name}`;
-            }
-
             return `
                 <div class="sidebar-item ${isActive ? 'active' : ''}" data-index="${actualIndex}">
-                    <span class="doc-indicator ${hasRequests ? 'has-requests' : ''}"></span>
+                    <span class="doc-indicator ${isOpened ? 'opened' : ''}"></span>
                     <div class="doc-info">
-                        <div class="doc-name-text">${escapeHtml(displayName)}</div>
+                        <div class="doc-name-text">${escapeHtml(doc.name)}</div>
                         <div class="doc-request-count ${hasRequests ? 'has-requests' : ''}">
                             ${requestCount} solicitação(ões)
                         </div>
